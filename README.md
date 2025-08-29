@@ -1,7 +1,7 @@
 # COLMAP Dynamic Camera Trajectory Visualization
 
 This tool visualizes **COLMAP** reconstruction results including camera poses and 3D points in an interactive 3D viewer, with support for dynamic playback of the camera trajectory.
-You can choose to show camera frustums progressively during playback, or display all at once.
+You can choose to show camera frustums progressively during playback (cumulative), or display all at once.
 
 👉 For the Chinese version, see [README\_CN](./README_CN.md)
 
@@ -27,21 +27,21 @@ If you want automatic conversion from `.bin` to `.txt`, ensure that `colmap` is 
 ## Usage
 
 ```bash
-python main.py --model_dir /path/to/sparse/0 [options]
+python main.py -m /path/to/sparse/0 [options]
 ```
 
 ### Key Arguments
 
-* `--model_dir` : Path to the COLMAP model (usually `sparse/0`)
-* `--fps` : Playback speed (default `5`)
-* `--traj_sort {id,name}` : Trajectory sorting method
+* `-m, --model` : Path to the COLMAP model (usually `sparse/0`)
+* `-f, --fps` : Playback speed (default `5`)
+* `-t, --traj` : Trajectory sorting method
 
   * `id` → ascending by `image_id`
   * `name` → natural order by filename
-* `--scale` : Camera frustum size (default `0.1`)
-* `--max_points` : Maximum number of points to render (default `200000`, random sampling if exceeded)
-* `--show_only_current_frustum` : If enabled, frustums will appear progressively along playback instead of showing all at once
-* `--use_colmap_converter` : Enable use of `colmap model_converter` when input files are `.bin` (default enabled)
+* `-s, --scale` : Camera frustum size (default `0.1`)
+* `-n, --max-points` : Maximum number of points to render (default `200000`, random sampling if exceeded)
+* `-C, --no-cumulative` : Disable cumulative frustum display (by default cumulative mode is **enabled**)
+* `-p, --play` : Start playing immediately
 
 ## Keyboard Controls
 
@@ -50,23 +50,23 @@ python main.py --model_dir /path/to/sparse/0 [options]
 * **p / P** : Previous frame (single step)
 * **+ / =** : Increase playback speed
 * **-** : Decrease playback speed
-* **r / R** : Reset to the first frame (also clears accumulated frustums if `--show_only_current_frustum` is enabled)
+* **r / R** : Reset to the first frame (also clears accumulated frustums if cumulative mode is enabled)
 * **q / Q / Esc** : Quit visualization
 
 ## Examples
 
 ```bash
-# Play trajectory in filename order, show frustums progressively
-python main.py --model_dir ./sparse/0 --traj_sort name --show_only_current_frustum
+# Play trajectory in filename order, show frustums progressively (default cumulative)
+python main.py -m ./sparse/0 -t name -p
 
 # Show all frustums at once, play at 8 FPS
-python main.py --model_dir ./sparse/0 --fps 8
+python main.py -m ./sparse/0 -f 8 -C
 ```
 
 ---
 
 ## Notes
 
-* Initial load may take time for large point clouds; reduce `--max_points` for faster visualization
-* With `--show_only_current_frustum`, cameras remain visible once played until reset or exit
+* Initial load may take time for large point clouds; reduce `-n` for faster visualization
+* In cumulative mode (default), cameras remain visible once played until reset or exit
 * Extension: If you want to render original images onto the frustums, you need to provide image file paths

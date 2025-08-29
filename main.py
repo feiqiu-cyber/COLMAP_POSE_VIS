@@ -1,31 +1,22 @@
 #!/usr/bin/env python3
 """
-visualize_colmap_dynamic.py
+visualize_colmap_dynamic_simplified.py
 
-Interactive / dynamic visualization of COLMAP poses + trajectory.
-
-Features:
- - Parse COLMAP TXT (or auto-convert from .bin if `colmap` is available)
- - Display point cloud, camera frustums and frames
- - Dynamically animate camera trajectory: play/pause, step, change speed
- - Highlight current camera (moving marker + colored frustum)
- - Optionally show only frustums up to the current camera while playing (cumulative)
- - Keyboard controls shown in the console
+Simplified argument interface for the original visualize_colmap_dynamic.py.
+Defaults to showing cumulative frustums (cumulative=True).
 
 Usage:
-  pip install open3d numpy
-  python visualize_colmap_dynamic.py --model_dir /path/to/sparse/0 --fps 5 --traj_sort name --show_only_current_frustum
+  python visualize_colmap_dynamic_simplified.py -m /path/to/sparse/0 -f 5
 
-Keyboard controls (when Open3D window active):
-  Space      : toggle play / pause
-  n or N     : step to next frame (when paused)
-  p or P     : step to previous frame (when paused)
-  + / =      : increase playback speed (fps)
-  -          : decrease playback speed (fps)
-  r or R     : reset to first camera (clears cumulative frustums if --show_only_current_frustum used)
-  q or Q / Esc: quit
+Short flags:
+  -m, --model       : model dir (required)
+  -t, --traj        : traj sort (name|id)
+  -s, --scale       : frustum scale
+  -n, --max         : max points
+  -f, --fps         : playback fps
+  -p, --play        : start playing immediately
+  -C, --no-cumulative : disable cumulative frustums (default: enabled)
 
-Note: requires Open3D with VisualizerWithKeyCallback support.
 """
 
 import argparse
@@ -34,7 +25,7 @@ import subprocess
 import time
 import math
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import numpy as np
 import open3d as o3d
@@ -99,7 +90,6 @@ def read_points3D_txt(path: str) -> Dict[int, Dict]:
 # -------------------------
 
 def qvec2rotmat(qvec: List[float]) -> np.ndarray:
-    # qvec: [qw, qx, qy, qz]
     qw, qx, qy, qz = qvec
     n = math.sqrt(qw*qw + qx*qx + qy*qy + qz*qz)
     if n == 0:
@@ -133,7 +123,7 @@ def build_K_from_camera(camera: Dict) -> np.ndarray:
             raise ValueError(f"Unknown camera params: {camera['model']} {params}")
     return K
 
-# natural sort for filenames
+
 def natural_key(s: str):
     parts = re.split('([0-9]+)', s)
     key = []
@@ -149,7 +139,6 @@ def natural_key(s: str):
 # -------------------------
 
 def create_camera_frustum(R: np.ndarray, t: np.ndarray, K: np.ndarray, width: int, height: int, scale: float = 0.5):
-    # Camera center
     C = -R.T.dot(t)
     corners_px = np.array([[0,0],[width,0],[width,height],[0,height]], dtype=float)
     z = scale
@@ -164,7 +153,6 @@ def create_camera_frustum(R: np.ndarray, t: np.ndarray, K: np.ndarray, width: in
     ls = o3d.geometry.LineSet(points=o3d.utility.Vector3dVector(points),
                               lines=o3d.utility.Vector2iVector(lines))
     ls.colors = o3d.utility.Vector3dVector([[0.0, 1.0, 0.0]] * len(lines))
-    # small coordinate frame
     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=scale*0.2)
     T = np.eye(4)
     T[:3,:3] = R.T
@@ -182,7 +170,7 @@ def convert_bin_to_txt(model_dir: str, out_dir: str):
     subprocess.check_call(cmd)
 
 # -------------------------
-# Main: prepare geometry + start interactive loop
+# Main visualizer (unchanged behaviour except defaults and simplified CLI)
 # -------------------------
 
 def visualize_dynamic(txt_dir: str,
@@ -190,7 +178,7 @@ def visualize_dynamic(txt_dir: str,
                       max_points: int = 200000,
                       traj_sort: str = 'name',
                       fps: float = 5.0,
-                      start_playing: bool = True,
+                      start_playing: bool = False,
                       show_only_current_frustum: bool = True):
 
     cameras = read_cameras_txt(os.path.join(txt_dir, 'cameras.txt'))
@@ -212,7 +200,6 @@ def visualize_dynamic(txt_dir: str,
     pcd.points = o3d.utility.Vector3dVector(pts)
     pcd.colors = o3d.utility.Vector3dVector(cols)
 
-    # order images for trajectory
     items = list(images.items())
     if traj_sort == 'id':
         items.sort(key=lambda x: x[0])
@@ -242,7 +229,6 @@ def visualize_dynamic(txt_dir: str,
         s.translate(C)
         cam_center_spheres.append(s)
 
-    # create full trajectory lineset (static - will be partially shown if desired)
     centers_np = np.array(cam_centers)
     traj_ls = None
     if len(centers_np) >= 2:
@@ -252,21 +238,18 @@ def visualize_dynamic(txt_dir: str,
                                        lines=o3d.utility.Vector2iVector(traj_lines))
         traj_ls.colors = o3d.utility.Vector3dVector([[1.0, 0.0, 0.0]] * len(traj_lines))
 
-    # moving highlight marker (a bigger sphere that will move along centers)
     highlight_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=scale*0.05)
     highlight_sphere.compute_vertex_normals()
     highlight_sphere.paint_uniform_color([0.0, 0.8, 1.0])
     if len(cam_centers) > 0:
         highlight_sphere.translate(cam_centers[0])
 
-    # build geometries list (only static/common ones added initially)
     geoms = [pcd]
     if traj_ls is not None:
         geoms.append(traj_ls)
     geoms.append(highlight_sphere)
     geoms.append(o3d.geometry.TriangleMesh.create_coordinate_frame(size=scale))
 
-    # state variables
     N = len(cam_centers)
     state = {
         'idx': 0,
@@ -276,21 +259,16 @@ def visualize_dynamic(txt_dir: str,
         'prev_idx': None
     }
 
-    # track which indices have been added to the visualizer when using cumulative mode
     added_indices = set()
 
-    # Create visualizer and add geometries (only the common ones and the initial current camera if requested)
     vis = o3d.visualization.VisualizerWithKeyCallback()
     vis.create_window(window_name='COLMAP dynamic trajectory', width=1600, height=900)
-    # add common geometries
     for g in geoms:
         vis.add_geometry(g)
 
-    # helper to ensure frustums up to idx are visible (cumulative behavior)
     def ensure_cumulative_until(vis_obj, idx):
         if idx is None or idx < 0:
             return
-        # add any indices from 0..idx that haven't been added yet
         for i in range(0, idx + 1):
             if i in added_indices:
                 continue
@@ -302,9 +280,7 @@ def visualize_dynamic(txt_dir: str,
             except Exception:
                 pass
 
-    # helper to set coloring: highlight current index, dim previous
     def recolor_cumulative(vis_obj, current_idx):
-        # for indices that have been added, color previous ones dim and current one highlighted
         for i in range(0, N):
             if i not in added_indices:
                 continue
@@ -323,9 +299,7 @@ def visualize_dynamic(txt_dir: str,
             except Exception:
                 pass
 
-    # helper to clear cumulative geometries (used on reset)
     def clear_cumulative(vis_obj):
-        # remove all added geometries from the visualizer
         for i in sorted(list(added_indices), reverse=True):
             try:
                 vis_obj.remove_geometry(cam_frustums[i], reset_bounding_box=False)
@@ -335,10 +309,8 @@ def visualize_dynamic(txt_dir: str,
                 pass
         added_indices.clear()
 
-    # helper: update highlight + partial trajectory
     def update_visuals(vis_obj):
         idx = state['idx']
-        # move highlight sphere to current center
         if N > 0:
             try:
                 verts = np.asarray(highlight_sphere.vertices)
@@ -350,13 +322,10 @@ def visualize_dynamic(txt_dir: str,
             except Exception:
                 pass
 
-        # manage cumulative frustums
         if show_only_current_frustum:
-            # cumulative: ensure all frustums up to idx are present
             ensure_cumulative_until(vis_obj, idx)
             recolor_cumulative(vis_obj, idx)
         else:
-            # non-cumulative: on first call add all frustums/frames/spheres if not added
             if state['prev_idx'] is None:
                 for i in range(N):
                     try:
@@ -365,7 +334,6 @@ def visualize_dynamic(txt_dir: str,
                         vis_obj.add_geometry(cam_center_spheres[i], reset_bounding_box=False)
                     except Exception:
                         pass
-                # recolor all (so current is highlighted)
                 for i in range(N):
                     try:
                         if i == idx:
@@ -382,7 +350,6 @@ def visualize_dynamic(txt_dir: str,
                     except Exception:
                         pass
 
-        # update partial trajectory: keep lines up to idx
         if traj_ls is not None and N >= 2:
             if idx >= 1:
                 new_lines = [[i, i+1] for i in range(min(idx, N-1))]
@@ -394,12 +361,13 @@ def visualize_dynamic(txt_dir: str,
 
         state['prev_idx'] = idx
 
-    # register key callbacks
+    # Key callbacks (same controls, reduced messages)
     def kb_toggle_play(vis_obj):
         state['playing'] = not state['playing']
         print('Playing ->', state['playing'])
         return False
     vis.register_key_callback(ord(' '), kb_toggle_play)
+
     def kb_next(vis_obj):
         state['idx'] = (state['idx'] + 1) % max(1, N)
         state['last_step_time'] = time.time()
@@ -407,6 +375,7 @@ def visualize_dynamic(txt_dir: str,
         return False
     vis.register_key_callback(ord('n'), kb_next)
     vis.register_key_callback(ord('N'), kb_next)
+
     def kb_prev(vis_obj):
         state['idx'] = (state['idx'] - 1) % max(1, N)
         state['last_step_time'] = time.time()
@@ -414,19 +383,21 @@ def visualize_dynamic(txt_dir: str,
         return False
     vis.register_key_callback(ord('p'), kb_prev)
     vis.register_key_callback(ord('P'), kb_prev)
+
     def kb_plus(vis_obj):
         state['fps'] = min(state['fps'] * 1.5, 60.0)
         print('FPS ->', state['fps'])
         return False
     vis.register_key_callback(ord('+'), kb_plus)
     vis.register_key_callback(ord('='), kb_plus)
+
     def kb_minus(vis_obj):
         state['fps'] = max(state['fps'] / 1.5, 0.1)
         print('FPS ->', state['fps'])
         return False
     vis.register_key_callback(ord('-'), kb_minus)
+
     def kb_reset(vis_obj):
-        # reset index and clear cumulative if in that mode
         state['idx'] = 0
         state['last_step_time'] = time.time()
         if show_only_current_frustum:
@@ -435,26 +406,22 @@ def visualize_dynamic(txt_dir: str,
         return False
     vis.register_key_callback(ord('r'), kb_reset)
     vis.register_key_callback(ord('R'), kb_reset)
+
     def kb_quit(vis_obj):
         print('Quitting...')
         vis_obj.close()
         return False
     vis.register_key_callback(ord('q'), kb_quit)
     vis.register_key_callback(ord('Q'), kb_quit)
-    # ESC
     vis.register_key_callback(256, kb_quit)
 
-    # initial visuals (if cumulative mode, show index 0 only)
+    # initial visuals
     if show_only_current_frustum:
         ensure_cumulative_until(vis, 0)
         recolor_cumulative(vis, 0)
-    else:
-        # other case will add all on first update
-        pass
     update_visuals(vis)
 
     try:
-        # main loop: poll events and update highlight per fps
         while vis.poll_events():
             now = time.time()
             if state['playing'] and N > 0:
@@ -476,18 +443,20 @@ def visualize_dynamic(txt_dir: str,
 # -------------------------
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_dir', type=str, required=True, help='COLMAP model dir (contains cameras.txt/images.txt/points3D.txt or .bin files)')
-    parser.add_argument('--use_colmap_converter', type=bool, default=True, help='If bin files present, try to use colmap model_converter')
-    parser.add_argument('--traj_sort', type=str, choices=['name','id'], default='name', help='Order for trajectory')
-    parser.add_argument('--scale', type=float, default=0.8, help='Frustum scale')
-    parser.add_argument('--max_points', type=int, default=200000, help='Max points to visualize')
-    parser.add_argument('--fps', type=float, default=5.0, help='Playback frames-per-second')
-    parser.add_argument('--start_playing', action='store_true', help='Start playing immediately')
-    parser.add_argument('--show_only_current_frustum', action='store_true', help='If set, only show frustums up to the current camera (cumulative) while playing')
+    parser = argparse.ArgumentParser(description='Short-flag COLMAP trajectory visualizer')
+    parser.add_argument('-m', '--model', required=True, help='COLMAP model dir (contains cameras.txt/images.txt/points3D.txt or .bin files)')
+    parser.add_argument('-t', '--traj', dest='traj_sort', type=str, choices=['name','id'], default='name', help='Order for trajectory')
+    parser.add_argument('-s', '--scale', dest='scale', type=float, default=0.8, help='Frustum scale')
+    parser.add_argument('-n', '--max', dest='max_points', type=int, default=200000, help='Max points to visualize')
+    parser.add_argument('-f', '--fps', dest='fps', type=float, default=5.0, help='Playback frames-per-second')
+    parser.add_argument('-p', '--play', dest='start_playing', action='store_true', help='Start playing immediately')
+    parser.add_argument('-C', '--no-cumulative', dest='cumulative', action='store_false',
+                        help='Disable cumulative frustums (default: cumulative enabled)')
+    parser.set_defaults(cumulative=True)
+
     args = parser.parse_args()
 
-    model_dir = args.model_dir
+    model_dir = args.model
     txt_dir = model_dir
     cameras_txt = os.path.join(txt_dir, 'cameras.txt')
     images_txt = os.path.join(txt_dir, 'images.txt')
@@ -497,18 +466,19 @@ def main():
     points_bin = os.path.join(model_dir, 'points3D.bin')
 
     if not (os.path.exists(cameras_txt) and os.path.exists(images_txt) and os.path.exists(points_txt)):
-        if args.use_colmap_converter and (os.path.exists(cameras_bin) and os.path.exists(images_bin) and os.path.exists(points_bin)):
+        if (os.path.exists(cameras_bin) and os.path.exists(images_bin) and os.path.exists(points_bin)):
             out_dir = os.path.join(model_dir, 'txt_export')
             os.makedirs(out_dir, exist_ok=True)
             convert_bin_to_txt(model_dir, out_dir)
             txt_dir = out_dir
         else:
-            raise RuntimeError('TXT files not found and conversion not possible. Provide cameras.txt/images.txt/points3D.txt or enable colmap converter.')
+            raise RuntimeError('TXT files not found and conversion not possible. Provide cameras.txt/images.txt/points3D.txt or place bin files in the same folder.')
 
     print('Controls: Space=play/pause, n=next, p=prev, +/- change speed, r=reset, q=quit')
-    print('If window is not focused, click it then use keys.')
+    print('Cumulative frustums (default ON) =', args.cumulative)
 
-    visualize_dynamic(txt_dir, scale=args.scale, max_points=args.max_points, traj_sort=args.traj_sort, fps=args.fps, start_playing=args.start_playing, show_only_current_frustum=args.show_only_current_frustum)
+    visualize_dynamic(txt_dir, scale=args.scale, max_points=args.max_points, traj_sort=args.traj_sort,
+                      fps=args.fps, start_playing=args.start_playing, show_only_current_frustum=args.cumulative)
 
 if __name__ == '__main__':
     main()
